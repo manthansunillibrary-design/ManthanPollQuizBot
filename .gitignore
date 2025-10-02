@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints
+
+# IDE files
+.vscode/
+.idea/
+
+# Service account JSON
+*.json
