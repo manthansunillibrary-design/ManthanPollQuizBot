@@ -1,4 +1,11 @@
+# Telegram bot
 python-telegram-bot==20.3
-gspread==6.10.1
-google-auth==2.23.0
-google-auth-oauthlib==1.0.0
+
+# Google Sheets access
+gspread==6.2.1
+oauth2client==4.1.3
+
+# For JSON handling and HTTP requests (optional, mostly built-in)
+requests==2.31.0
+
+# Logging (built-in, optional)
