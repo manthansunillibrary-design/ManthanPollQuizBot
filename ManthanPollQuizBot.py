@@ -9,9 +9,17 @@ ManthanPollQuizBot
   2. Emoji reactions in one line
   3. QuizID-based batch sending
 """
-
 import os
 import json
+import gspread
+
+# Google Sheets access via env var
+credentials_dict = json.loads(os.environ['GOOGLE_CREDENTIALS'])
+gc = gspread.service_account_from_dict(credentials_dict)
+sh = gc.open(SHEET_NAME)
+ws = sh.sheet1
+
+
 import logging
 import uuid
 from datetime import datetime
