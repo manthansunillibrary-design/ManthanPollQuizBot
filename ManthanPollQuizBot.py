@@ -47,11 +47,21 @@ logger = logging.getLogger(__name__)
 poll_data = {}      # poll_id -> poll runtime info
 emoji_counts = {}   # poll_id -> {"like":0, "love":0,"haha":0,"angry":0}
 
+
+
+
 # ---------------- Google Sheets ----------------
-creds_dict = json.loads(GOOGLE_CREDS_JSON)
-gc = gspread.service_account_from_dict(creds_dict)
+import os
+import json
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+# Use Render environment variable for credentials
+credentials_dict = json.loads(os.environ['GOOGLE_CREDENTIALS'])
+gc = gspread.service_account_from_dict(credentials_dict)
 sh = gc.open(SHEET_NAME)
 ws = sh.sheet1
+
 
 DEFAULT_HEADERS = [
     "ID","Question","Option1","Option2","Option3","Option4",
