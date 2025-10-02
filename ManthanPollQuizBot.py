@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-ManthanPollQuizBot - Render Ready Version
+ManthanPollQuizBot
 - Google Sheet: "ManthanPollQuiz"
-- Google Service Account JSON from ENV
-- Bot Token from ENV
+- Service account JSON via environment variable GOOGLE_CREDENTIALS
+- Bot Token via BOT_TOKEN variable
 - Features:
   1. Coaching name above question
   2. Emoji reactions in one line
   3. QuizID-based batch sending
 """
 
-import logging
-import uuid
 import os
 import json
+import logging
+import uuid
 from datetime import datetime
 import gspread
 from telegram import Poll, InlineKeyboardButton, InlineKeyboardMarkup
@@ -26,16 +26,15 @@ from telegram.ext import (
 )
 
 # ---------------- CONFIG ----------------
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # Render → Env Var
-SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_CREDENTIALS")  # Render → Env Var
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Set this in Render env vars
+GOOGLE_CREDS_JSON = os.environ.get("GOOGLE_CREDENTIALS")  # Set this in Render env vars
 SHEET_NAME = "ManthanPollQuiz"
 COACHING_NAME = "🏫 Manthan Competition Classes"
 
-DEFAULT_HEADERS = [
-    "ID","Question","Option1","Option2","Option3","Option4",
-    "CorrectOption","QuizID","PollID","ChatID","MessageID",
-    "ResultsMessageID","Link","CreatedAt"
-]
+if not BOT_TOKEN:
+    raise RuntimeError("❌ BOT_TOKEN env var missing!")
+if not GOOGLE_CREDS_JSON:
+    raise RuntimeError("❌ GOOGLE_CREDENTIALS env var missing!")
 
 # ---------------- Logging ----------------
 logging.basicConfig(
@@ -44,18 +43,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ---------------- Google Sheets ----------------
-if not SERVICE_ACCOUNT_JSON:
-    raise RuntimeError("❌ GOOGLE_CREDENTIALS env var missing!")
+# ---------------- Global Stores ----------------
+poll_data = {}      # poll_id -> poll runtime info
+emoji_counts = {}   # poll_id -> {"like":0, "love":0,"haha":0,"angry":0}
 
-creds_dict = json.loads(SERVICE_ACCOUNT_JSON)
+# ---------------- Google Sheets ----------------
+creds_dict = json.loads(GOOGLE_CREDS_JSON)
 gc = gspread.service_account_from_dict(creds_dict)
 sh = gc.open(SHEET_NAME)
 ws = sh.sheet1
 
-# ---------------- Global Stores ----------------
-poll_data = {}  # poll_id -> poll runtime info
-emoji_counts = {}  # poll_id -> {"like":0, "love":0,"haha":0,"angry":0}
+DEFAULT_HEADERS = [
+    "ID","Question","Option1","Option2","Option3","Option4",
+    "CorrectOption","QuizID","PollID","ChatID","MessageID",
+    "ResultsMessageID","Link","CreatedAt"
+]
 
 def ensure_headers_and_map():
     current = ws.row_values(1)
@@ -74,7 +76,7 @@ COL = ensure_headers_and_map()
 def assign_ids_if_missing():
     records = ws.get_all_records()
     for idx, rec in enumerate(records, start=2):
-        if not str(rec.get("ID","")).strip():  # only if empty
+        if not str(rec.get("ID","")).strip():
             qid = "Q" + uuid.uuid4().hex[:8]
             ws.update_cell(idx, COL["ID"], qid)
             ws.update_cell(idx, COL["CreatedAt"], datetime.utcnow().isoformat())
@@ -172,11 +174,9 @@ async def start(update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await update.message.reply_text(f"नमस्ते {user.first_name}! मैं Manthan Poll/Quiz Bot हूँ.\nUse /quiz to get a new question here.")
 
-# ---------------- QuizID Batch Send ----------------
 async def quiz_cmd(update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     records = ws.get_all_records()
-
     first_row = None
     quiz_id = None
     for idx, rec in enumerate(records, start=2):
@@ -184,26 +184,21 @@ async def quiz_cmd(update, context: ContextTypes.DEFAULT_TYPE):
             first_row = idx
             quiz_id = rec.get("QuizID","")
             break
-
     if not first_row:
         await update.message.reply_text("कोई नया question नहीं मिला (सब already posted).")
         return
-
     sent = 0
     for idx, rec in enumerate(records, start=2):
         if rec.get("QuizID","") == quiz_id and not str(rec.get("PollID","")).strip():
             ok = await send_poll_for_row(context, idx, chat_id)
             if ok:
                 sent += 1
-
     await update.message.reply_text(f"{sent} questions from QuizID {quiz_id} sent ✅")
 
-# ---------------- Sync IDs ----------------
 async def syncids(update, context: ContextTypes.DEFAULT_TYPE):
     assign_ids_if_missing()
     await update.message.reply_text("Missing IDs generated and CreatedAt updated.")
 
-# ---------------- Poll Answer ----------------
 async def poll_answer_handler(update, context: ContextTypes.DEFAULT_TYPE):
     answer = update.poll_answer
     poll_id = answer.poll_id
@@ -219,7 +214,6 @@ async def poll_answer_handler(update, context: ContextTypes.DEFAULT_TYPE):
     for i in to_remove:
         if 0<=i<len(entry["votes"]): entry["votes"][i]-=1
     entry["user_votes"][user_id]=new_set
-
     lines=["Current Votes:"]
     for idx,opt in enumerate(entry["options"]):
         lines.append(f"{idx+1}. {opt} — {entry['votes'][idx]} votes")
@@ -228,7 +222,6 @@ async def poll_answer_handler(update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.edit_message_text(chat_id=entry["chat_id"],message_id=entry["results_msg_id"],text=result_text)
     except: pass
 
-# ---------------- Emoji Callback ----------------
 async def emoji_callback(update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
@@ -237,7 +230,6 @@ async def emoji_callback(update, context: ContextTypes.DEFAULT_TYPE):
     except: return
     if poll_id not in emoji_counts: return
     emoji_counts[poll_id][emoji_type]+=1
-
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton(f"👍 {emoji_counts[poll_id]['like']}", callback_data=f"{poll_id}_like"),
         InlineKeyboardButton(f"❤️ {emoji_counts[poll_id]['love']}", callback_data=f"{poll_id}_love"),
@@ -257,7 +249,7 @@ def main():
     app.add_handler(CallbackQueryHandler(emoji_callback))
 
     assign_ids_if_missing()
-    logger.info("Bot starting on Render... 🚀")
+    logger.info("Bot starting... Press Ctrl+C to stop.")
     app.run_polling()
 
 if __name__=="__main__":
