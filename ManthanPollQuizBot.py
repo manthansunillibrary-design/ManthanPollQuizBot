@@ -76,8 +76,7 @@ def ensure_headers_and_map():
 COL = ensure_headers_and_map()
 
 # ---------------- ID Assignment ----------------
-DEFAULT_TIMER = 20  # ensure exists near top of file
-  def assign_ids_if_missing():
+def assign_ids_if_missing():
     """
     Batch-update version:
     - Generate missing IDs and CreatedAt
@@ -117,11 +116,15 @@ DEFAULT_TIMER = 20  # ensure exists near top of file
         body = {"valueInputOption": "USER_ENTERED", "data": updates}
         ws.spreadsheet.values_batch_update(body)
 
-
-
 # ---------------- Poll Management ----------------
 emoji_counts = {}
 poll_data = {}
+
+def get_row_record(rownum: int):
+    recs = ws.get_all_records()
+    if 2 <= rownum <= len(recs)+1:
+        return recs[rownum-2]
+    return {}
 
 async def send_poll_for_row(context: ContextTypes.DEFAULT_TYPE, rownum:int, chat_id:int):
     rec = get_row_record(rownum)
