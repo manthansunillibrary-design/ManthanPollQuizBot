@@ -76,34 +76,49 @@ def ensure_headers_and_map():
 COL = ensure_headers_and_map()
 
 # ---------------- ID Assignment ----------------
+
+        DEFAULT_TIMER = 20  # ensure exists near top of file
+
 def assign_ids_if_missing():
-    all_values = ws.get_all_values()
-    updates = []
+    """
+    Batch-update version:
+    - Generate missing IDs and CreatedAt
+    - Fill default TimerSec where empty
+    Uses a single batch request to reduce write-rate quota errors.
+    """
+    records = ws.get_all_records()
+    if not records:
+        return
 
-    for idx, row in enumerate(all_values, start=1):
-        if idx == 1:  # skip header row
-            continue
+    updates = []  # collect (row, col, value) tuples for batch update
 
-        q_id = row[COL["QID"]-1]      # COL dict 1-based hai, list 0-based
-        timer = row[COL["TimerSec"]-1]
-
-        # agar QID khali hai to set karo
-        if not q_id:
+    for idx, rec in enumerate(records, start=2):
+        # ID
+        current_id = rec.get("ID", "")
+        if not str(current_id).strip():
+            new_id = "Q" + uuid.uuid4().hex[:8]
             updates.append({
-                "range": f"{gspread.utils.rowcol_to_a1(idx, COL['QID'])}",
-                "values": [[f"Q{idx-1}"]]
+                "range": gspread.utils.rowcol_to_a1(idx, COL["ID"]),
+                "values": [[new_id]]
+            })
+            updates.append({
+                "range": gspread.utils.rowcol_to_a1(idx, COL["CreatedAt"]),
+                "values": [[datetime.utcnow().isoformat()]]
             })
 
-        # agar TimerSec khali hai to default daalo
-        if not timer:
+        # TimerSec
+        timer_val = rec.get("TimerSec", "")
+        if timer_val is None or str(timer_val).strip() == "":
             updates.append({
-                "range": f"{gspread.utils.rowcol_to_a1(idx, COL['TimerSec'])}",
-                "values": [[DEFAULT_TIMER]]
+                "range": gspread.utils.rowcol_to_a1(idx, COL["TimerSec"]),
+                "values": [[str(DEFAULT_TIMER)]]
             })
 
-    # ek hi batch update se sab changes karo
+    # If updates collected, do a single batch_update (via values_batch_update)
     if updates:
-        ws.batch_update(updates)
+        body = {"valueInputOption": "USER_ENTERED", "data": updates}
+        ws.spreadsheet.values_batch_update(body)
+
 
 
 # ---------------- Poll Management ----------------
