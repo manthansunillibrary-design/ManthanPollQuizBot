@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 ManthanPollQuizBot - Render + Telegram Ready
+- Sequential Quiz Flow with shared link
 - Google Sheet: "ManthanPollQuiz"
 - Service account JSON via env var GOOGLE_CREDENTIALS
 - Bot Token via BOT_TOKEN env var
@@ -10,6 +11,7 @@ import os
 import json
 import logging
 import uuid
+import asyncio
 from datetime import datetime
 import gspread
 from telegram import Poll, InlineKeyboardButton, InlineKeyboardMarkup
@@ -26,6 +28,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_CREDENTIALS")  # Render env var
 SHEET_NAME = "ManthanPollQuiz"
 COACHING_NAME = "🏫 Manthan Competition Classes"
+DEFAULT_TIMER = 20  # seconds
 
 # ---------------- Check Secrets ----------------
 if not BOT_TOKEN:
@@ -43,19 +46,12 @@ logger = logging.getLogger(__name__)
 # ---------------- Google Sheets ----------------
 try:
     credentials_dict = json.loads(SERVICE_ACCOUNT_JSON)
-
-    # Fix private_key newline escape for Render
     if "private_key" in credentials_dict:
         credentials_dict["private_key"] = credentials_dict["private_key"].replace('\\n', '\n')
-
-    # Connect to gspread
     gc = gspread.service_account_from_dict(credentials_dict)
     sh = gc.open(SHEET_NAME)
     ws = sh.sheet1
     logger.info("✅ gspread connected successfully!")
-
-except json.JSONDecodeError as e:
-    raise RuntimeError(f"❌ Failed to parse GOOGLE_CREDENTIALS JSON: {e}")
 except Exception as e:
     raise RuntimeError(f"❌ Failed to connect gspread: {e}")
 
@@ -63,7 +59,7 @@ except Exception as e:
 DEFAULT_HEADERS = [
     "ID","Question","Option1","Option2","Option3","Option4",
     "CorrectOption","QuizID","PollID","ChatID","MessageID",
-    "ResultsMessageID","Link","CreatedAt"
+    "ResultsMessageID","Link","CreatedAt","TimerSec"
 ]
 
 def ensure_headers_and_map():
@@ -87,6 +83,8 @@ def assign_ids_if_missing():
             qid = "Q" + uuid.uuid4().hex[:8]
             ws.update_cell(idx, COL["ID"], qid)
             ws.update_cell(idx, COL["CreatedAt"], datetime.utcnow().isoformat())
+        if not rec.get("TimerSec"):
+            ws.update_cell(idx, COL["TimerSec"], DEFAULT_TIMER)
 
 def get_row_record(rownum):
     values = ws.row_values(rownum)
@@ -178,33 +176,42 @@ async def send_poll_for_row(context: ContextTypes.DEFAULT_TYPE, rownum:int, chat
     logger.info(f"Sent poll row={rownum} poll_id={poll_id} chat={chat_id}")
     return True
 
+# ---------------- Sequential Quiz ----------------
+async def start_sequential_quiz(context: ContextTypes.DEFAULT_TYPE, chat_id:int, quiz_id:str):
+    records = ws.get_all_records()
+    for idx, rec in enumerate(records, start=2):
+        if rec.get("QuizID","") == quiz_id and not str(rec.get("PollID","")).strip():
+            timer_sec = rec.get("TimerSec")
+            try:
+                timer_sec = int(timer_sec)
+            except:
+                timer_sec = DEFAULT_TIMER
+            await send_poll_for_row(context, idx, chat_id)
+            await asyncio.sleep(timer_sec)
+
 # ---------------- Command Handlers ----------------
 async def start(update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await update.message.reply_text(
-        f"नमस्ते {user.first_name}! मैं Manthan Poll/Quiz Bot हूँ.\nUse /quiz to get a new question here."
+        f"नमस्ते {user.first_name}! मैं Manthan Poll/Quiz Bot हूँ.\nUse /quiz to get a new quiz link."
     )
 
 async def quiz_cmd(update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     records = ws.get_all_records()
-    first_row = None
-    quiz_id = None
-    for idx, rec in enumerate(records, start=2):
+    first_quiz_id = None
+    for rec in records:
         if not str(rec.get("PollID","")).strip():
-            first_row = idx
-            quiz_id = rec.get("QuizID","")
+            first_quiz_id = rec.get("QuizID","")
             break
-    if not first_row:
+    if not first_quiz_id:
         await update.message.reply_text("कोई नया question नहीं मिला (सब already posted).")
         return
-    sent = 0
-    for idx, rec in enumerate(records, start=2):
-        if rec.get("QuizID","") == quiz_id and not str(rec.get("PollID","")).strip():
-            ok = await send_poll_for_row(context, idx, chat_id)
-            if ok:
-                sent += 1
-    await update.message.reply_text(f"{sent} questions from QuizID {quiz_id} sent ✅")
+    me = await context.bot.get_me()
+    shared_link = f"https://t.me/{me.username}?start={first_quiz_id}"
+    await update.message.reply_text(f"Quiz ready! Share this link with students:\n{shared_link}")
+    # Start sequential quiz asynchronously
+    asyncio.create_task(start_sequential_quiz(context, chat_id, first_quiz_id))
 
 async def syncids(update, context: ContextTypes.DEFAULT_TYPE):
     assign_ids_if_missing()
