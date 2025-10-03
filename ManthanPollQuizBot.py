@@ -77,22 +77,34 @@ COL = ensure_headers_and_map()
 
 # ---------------- ID Assignment ----------------
 def assign_ids_if_missing():
-    records = ws.get_all_records()
-    for idx, rec in enumerate(records, start=2):
-        if not str(rec.get("ID","")).strip():
-            qid = "Q" + uuid.uuid4().hex[:8]
-            ws.update_cell(idx, COL["ID"], qid)
-            ws.update_cell(idx, COL["CreatedAt"], datetime.utcnow().isoformat())
-        if not rec.get("TimerSec"):
-            ws.update_cell(idx, COL["TimerSec"], DEFAULT_TIMER)
+    all_values = ws.get_all_values()
+    updates = []
 
-def get_row_record(rownum):
-    values = ws.row_values(rownum)
-    record = {}
-    for h in COL:
-        c = COL[h]
-        record[h] = values[c-1] if len(values) >= c else ""
-    return record
+    for idx, row in enumerate(all_values, start=1):
+        if idx == 1:  # skip header row
+            continue
+
+        q_id = row[COL["QID"]-1]      # COL dict 1-based hai, list 0-based
+        timer = row[COL["TimerSec"]-1]
+
+        # agar QID khali hai to set karo
+        if not q_id:
+            updates.append({
+                "range": f"{gspread.utils.rowcol_to_a1(idx, COL['QID'])}",
+                "values": [[f"Q{idx-1}"]]
+            })
+
+        # agar TimerSec khali hai to default daalo
+        if not timer:
+            updates.append({
+                "range": f"{gspread.utils.rowcol_to_a1(idx, COL['TimerSec'])}",
+                "values": [[DEFAULT_TIMER]]
+            })
+
+    # ek hi batch update se sab changes karo
+    if updates:
+        ws.batch_update(updates)
+
 
 # ---------------- Poll Management ----------------
 emoji_counts = {}
