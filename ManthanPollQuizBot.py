@@ -23,7 +23,7 @@ from telegram.ext import (
 
 # ---------------- CONFIG ----------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_CREDENTIALS")
+SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_CREDENTIALS")  # Render env var
 SHEET_NAME = "ManthanPollQuiz"
 COACHING_NAME = "🏫 Manthan Competition Classes"
 
@@ -41,11 +41,25 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------------- Google Sheets ----------------
-credentials_dict = json.loads(SERVICE_ACCOUNT_JSON)
-gc = gspread.service_account_from_dict(credentials_dict)
-sh = gc.open(SHEET_NAME)
-ws = sh.sheet1
+try:
+    credentials_dict = json.loads(SERVICE_ACCOUNT_JSON)
 
+    # Fix private_key newline escape for Render
+    if "private_key" in credentials_dict:
+        credentials_dict["private_key"] = credentials_dict["private_key"].replace('\\n', '\n')
+
+    # Connect to gspread
+    gc = gspread.service_account_from_dict(credentials_dict)
+    sh = gc.open(SHEET_NAME)
+    ws = sh.sheet1
+    logger.info("✅ gspread connected successfully!")
+
+except json.JSONDecodeError as e:
+    raise RuntimeError(f"❌ Failed to parse GOOGLE_CREDENTIALS JSON: {e}")
+except Exception as e:
+    raise RuntimeError(f"❌ Failed to connect gspread: {e}")
+
+# ---------------- Default Headers ----------------
 DEFAULT_HEADERS = [
     "ID","Question","Option1","Option2","Option3","Option4",
     "CorrectOption","QuizID","PollID","ChatID","MessageID",
@@ -82,7 +96,7 @@ def get_row_record(rownum):
         record[h] = values[c-1] if len(values) >= c else ""
     return record
 
-# ---------------- Send Poll ----------------
+# ---------------- Poll Management ----------------
 emoji_counts = {}
 poll_data = {}
 
@@ -246,7 +260,7 @@ def main():
     app.add_handler(CallbackQueryHandler(emoji_callback))
 
     assign_ids_if_missing()
-    logger.info("Bot starting... Press Ctrl+C to stop.")
+    logger.info("🚀 Bot starting... Press Ctrl+C to stop.")
     app.run_polling()
 
 if __name__=="__main__":
