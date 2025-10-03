@@ -76,10 +76,8 @@ def ensure_headers_and_map():
 COL = ensure_headers_and_map()
 
 # ---------------- ID Assignment ----------------
-
-        DEFAULT_TIMER = 20  # ensure exists near top of file
-
-def assign_ids_if_missing():
+DEFAULT_TIMER = 20  # ensure exists near top of file
+  def assign_ids_if_missing():
     """
     Batch-update version:
     - Generate missing IDs and CreatedAt
